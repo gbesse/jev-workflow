@@ -17,7 +17,7 @@ import { runPreflight } from "./preflight.js";
 import { readDecisionTrace, traceToRegressionCase } from "./trace.js";
 import type { CompiledWorkflow, FuzzMutationName, SignedEgressManifest, StabilityState, SystemOneResult } from "./types.js";
 
-const VERSION = "0.2.0";
+const VERSION = "0.2.1";
 
 function usage(): string {
   return `jev-workflow ${VERSION} — compile and run auditable Jev policies

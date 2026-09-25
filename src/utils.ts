@@ -12,9 +12,28 @@ export function isJsonValue(value: unknown): value is JsonValue {
   return isObject(value) && Object.values(value).every(isJsonValue);
 }
 
+const UNSAFE_PATH_SEGMENTS = new Set(["__proto__", "constructor", "prototype"]);
+
+function splitPath(path: string): string[] {
+  const parts = path.split(".");
+  if (parts.some((part) => part.length === 0)) throw new Error("path must contain non-empty segments");
+  const unsafe = parts.find((part) => UNSAFE_PATH_SEGMENTS.has(part));
+  if (unsafe) throw new Error(`unsafe path segment: ${unsafe}`);
+  return parts;
+}
+
+function setOwn(target: JsonObject, key: string, value: JsonValue): void {
+  Object.defineProperty(target, key, {
+    value,
+    enumerable: true,
+    configurable: true,
+    writable: true,
+  });
+}
+
 export function getPath(root: unknown, path: string): unknown {
   let current = root;
-  for (const part of path.split(".")) {
+  for (const part of splitPath(path)) {
     if (!isObject(current) && !Array.isArray(current)) return undefined;
     current = (current as Record<string, unknown>)[part];
   }
@@ -22,14 +41,19 @@ export function getPath(root: unknown, path: string): unknown {
 }
 
 export function setPath(root: JsonObject, path: string, value: JsonValue): void {
-  const parts = path.split(".");
+  const parts = splitPath(path);
   let current = root;
   for (const part of parts.slice(0, -1)) {
-    const next = current[part];
-    if (!next || typeof next !== "object" || Array.isArray(next)) current[part] = {};
-    current = current[part] as JsonObject;
+    const next = Object.hasOwn(current, part) ? current[part] : undefined;
+    if (!next || typeof next !== "object" || Array.isArray(next)) {
+      const branch: JsonObject = {};
+      setOwn(current, part, branch);
+      current = branch;
+    } else {
+      current = next;
+    }
   }
-  current[parts.at(-1)!] = value;
+  setOwn(current, parts.at(-1)!, value);
 }
 
 function stable(value: JsonValue): JsonValue {

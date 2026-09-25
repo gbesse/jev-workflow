@@ -1,0 +1,54 @@
+{
+  "name": "jev-workflow",
+  "version": "0.2.0",
+  "description": "Decision contracts, adversarial testing, tracing, stability, and privacy controls for TypeSafe Jev.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gbesse/jev-workflow.git"
+  },
+  "homepage": "https://github.com/gbesse/jev-workflow#readme",
+  "bugs": "https://github.com/gbesse/jev-workflow/issues",
+  "keywords": [
+    "jev",
+    "typesafe",
+    "decision-engine",
+    "adversarial-testing",
+    "observability",
+    "privacy"
+  ],
+  "type": "module",
+  "bin": {
+    "jev-workflow": "dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "packs",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "check": "tsc --noEmit",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "release:check": "npm run check && npm test && npm run build && npm pack --dry-run"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "yaml": "^2.8.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.5.2",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  },
+  "license": "MIT"
+}

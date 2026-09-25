@@ -1,0 +1,34 @@
+{
+  "model": "jev-fixture",
+  "answers": {
+    "service": {
+      "type": "choice",
+      "choice": "facturation",
+      "confidence": 0.93,
+      "probabilities": {
+        "facturation": 0.91,
+        "technique": 0.01,
+        "compte": 0.01,
+        "commande": 0.02,
+        "commercial": 0.01,
+        "juridique": 0.01,
+        "autre": 0.03
+      }
+    },
+    "urgent": { "type": "noul", "noul": 0.18 },
+    "frustration": {
+      "type": "score",
+      "score": 0.42,
+      "confidence": 0.76,
+      "legend": {
+        "0": "Ton neutre ou cordial, sans mécontentement explicite.",
+        "1": "Mécontentement ou agacement explicite, sans menace ni attaque forte.",
+        "2": "Colère forte, menace de départ, accusation grave ou langage agressif."
+      },
+      "probabilities": { "0": 0.61, "1": 0.36, "2": 0.03 }
+    },
+    "legal_risk": { "type": "noul", "noul": 0.04 },
+    "refund_request": { "type": "noul", "noul": 0.96 }
+  },
+  "usage": { "input_tokens": 742, "output_tokens": 51 }
+}

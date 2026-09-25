@@ -1,0 +1,197 @@
+version: 1
+name: sav-fr
+policyVersion: 0.2.0
+locale: fr-FR
+model: jev-1.13.0
+
+input:
+  ticket.message: { type: string, required: true }
+  ticket.channel: { type: string, required: true }
+  ticket.created_at: { type: datetime, required: true }
+  ticket.customer_tier: { type: string }
+  ticket.order_status: { type: string }
+  ticket.amount_eur: { type: number }
+  received_at: { type: datetime, required: true }
+
+state:
+  include:
+    - ticket.message
+    - ticket.channel
+    - ticket.customer_tier
+    - ticket.order_status
+    - ticket.amount_eur
+
+egress:
+  allow:
+    - ticket.message
+    - ticket.channel
+    - ticket.customer_tier
+    - ticket.order_status
+    - ticket.amount_eur
+    - _derived
+  classifications:
+    ticket.message: personal
+    ticket.channel: public
+    ticket.customer_tier: internal
+    ticket.order_status: internal
+    ticket.amount_eur: sensitive
+    _derived: internal
+  allowClassifications: [public, internal, personal, sensitive]
+  requireExplicitClassification: true
+  destination: { service: typesafe-systemone, region: eu }
+  requiredRegion: eu
+  onViolation: reject
+
+stability:
+  minConsecutive: 2
+  minDwellMs: 30000
+  cooldownMs: 30000
+
+preflight:
+  text:
+    - path: ticket.message
+      maxCharacters: 6000
+      normalizeWhitespace: true
+      overflow: reject
+  dates:
+    - id: ticket_age_days
+      from: ticket.created_at
+      to: received_at
+      unit: days
+      rounding: floor
+  comparisons:
+    - id: high_value_refund
+      path: ticket.amount_eur
+      op: gte
+      value: 250
+  security:
+    scanPaths: [ticket.message]
+    detectPii: true
+    piiAction: redact
+    detectInstructionInjection: true
+    injectionAction: warn
+
+questions:
+  service:
+    type: choice
+    instructions: Quel service doit traiter principalement la demande décrite dans `ticket.message` ? Choisir d'après l'objet concret de la demande, pas d'après le ton.
+    criteria:
+      facturation: Paiement, prélèvement, facture, remboursement ou tarification déjà appliquée.
+      technique: Problème rencontré pendant l'utilisation d'une fonction existante, erreur, panne, intégration cassée ou comportement logiciel inattendu ; pas une question générale sur les capacités du produit.
+      compte: Connexion, accès, mot de passe, identité ou paramètres du compte.
+      commande: Livraison, colis, retour physique ou état d'une commande.
+      commercial: Devis, démonstration, offre, achat futur, changement de forfait ou question générale avant usage sur les capacités du produit, notamment la disponibilité d'une API.
+      juridique: Mise en demeure, litige formel, autorité, avocat ou obligation réglementaire.
+      autre: Aucun des services précédents ne correspond clairement.
+    guard:
+      minConfidence: 0.72
+      minMargin: 0.15
+
+  urgent:
+    type: noul
+    instructions: Le texte dans `ticket.message` décrit-il une conséquence actuelle qui exige un traitement avant la file normale ?
+    criteria:
+      true: Service bloqué, perte en cours, personnes actuellement affectées, échéance explicite très proche ou danger immédiat.
+      false: Demande sans conséquence actuelle, simple mécontentement, préférence de rapidité, colis à rechercher ou problème d'accès sans impact opérationnel explicitement décrit.
+    guard:
+      minMargin: 0.30
+
+  frustration:
+    type: score
+    instructions: Quel niveau de frustration le client exprime-t-il explicitement dans `ticket.message` ?
+    criteria:
+      - Ton neutre ou cordial, sans mécontentement explicite.
+      - Mécontentement ou agacement explicite, sans menace ni attaque forte.
+      - Colère forte, menace de départ, accusation grave ou langage agressif.
+    guard:
+      minConfidence: 0.65
+      requiredForAuto: false
+
+  legal_risk:
+    type: noul
+    instructions: Le texte dans `ticket.message` contient-il un signal juridique ou réglementaire explicite qui nécessite une revue spécialisée ?
+    criteria:
+      true: Mise en demeure, avocat, plainte auprès d'une autorité, procédure, obligation légale ou demande RGPD formelle.
+      false: Réclamation commerciale ordinaire sans signal juridique ou réglementaire explicite.
+    guard:
+      minMargin: 0.25
+
+  refund_request:
+    type: noul
+    instructions: Le client demande-t-il explicitement que de l'argent déjà payé lui soit rendu ?
+    criteria:
+      true: Demande explicite de remboursement, restitution ou annulation avec retour des fonds.
+      false: Question, contestation ou plainte sans demande explicite de rendre l'argent.
+    guard:
+      minMargin: 0.20
+      requiredForAuto: false
+
+routing:
+  onUncertain:
+    queue: human_review
+    priority: normal
+    automation: hold
+  rules:
+    - id: possible-injection
+      when: { path: preflight.hasInstructionInjection, op: eq, value: true }
+      outcome: { queue: human_review, priority: high, automation: hold }
+      reason: Le texte contient un signal d'instruction hostile ; Jev reste consultatif et une revue humaine est requise.
+
+    - id: legal-review
+      when: { path: answers.legal_risk.noul, op: gte, value: 0.55 }
+      outcome: { queue: juridique, priority: high, automation: hold }
+      reason: Un signal juridique explicite dépasse le seuil conservateur.
+
+    - id: high-value-refund
+      when:
+        all:
+          - { path: answers.refund_request.noul, op: gte, value: 0.65 }
+          - { path: derived.high_value_refund, op: eq, value: true }
+      outcome: { queue: remboursements, priority: high, automation: approval_required }
+      reason: La demande de remboursement dépasse le seuil monétaire calculé en code.
+
+    - id: urgent-case
+      when: { path: answers.urgent.noul, op: gte, value: 0.70 }
+      outcome: { queue: incident, priority: urgent, automation: human_owned }
+      reason: Une conséquence actuelle exige un traitement prioritaire.
+
+    - id: explicit-refund
+      when: { path: answers.refund_request.noul, op: gte, value: 0.65 }
+      outcome: { queue: remboursements, priority: normal, automation: draft_only }
+      reason: Le client demande explicitement un remboursement.
+
+    - id: billing
+      when: { path: answers.service.choice, op: eq, value: facturation }
+      outcome: { queue: facturation, priority: normal, automation: triage_only }
+      reason: La demande relève principalement de la facturation.
+
+    - id: technical
+      when: { path: answers.service.choice, op: eq, value: technique }
+      outcome: { queue: support_technique, priority: normal, automation: triage_only }
+      reason: La demande relève principalement du support technique.
+
+    - id: account
+      when: { path: answers.service.choice, op: eq, value: compte }
+      outcome: { queue: comptes, priority: normal, automation: triage_only }
+      reason: La demande concerne l'accès ou les paramètres du compte.
+
+    - id: order
+      when: { path: answers.service.choice, op: eq, value: commande }
+      outcome: { queue: commandes, priority: normal, automation: triage_only }
+      reason: La demande concerne une commande ou une livraison.
+
+    - id: sales
+      when: { path: answers.service.choice, op: eq, value: commercial }
+      outcome: { queue: commercial, priority: normal, automation: triage_only }
+      reason: La demande concerne un achat futur ou une offre.
+
+  default:
+    queue: accueil
+    priority: normal
+    automation: human_owned
+
+audit:
+  path: .jev/audit.jsonl
+  includeInput: false
+  redact:
+    - ticket.message

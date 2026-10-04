@@ -30,6 +30,8 @@ The useful contract is not “the model usually answers correctly.” It is:
 - uncertain results lead to a bounded fallback.
 
 `jev-workflow` compiles that contract from YAML into a fingerprinted artifact.
+Compiled artifacts are fully revalidated when loaded; the fingerprint is an
+integrity checksum, not a cryptographic signature or authorization mechanism.
 
 ## Four operational modules
 
@@ -99,6 +101,9 @@ jev-workflow run workflow.lock.json --input input.json --live \
 For multiple entities, applications should keep one `StabilityState` per
 entity key through the TypeScript API. The CLI state file is intentionally a
 single-process reference implementation, not a distributed lock.
+When a proposal is held, `decision.ruleId` is cleared and the rejected proposal
+is preserved under `decision.proposed`, so audit consumers cannot attribute the
+stable emitted outcome to the wrong routing rule.
 
 ### Jev Egress
 
@@ -188,6 +193,10 @@ Conditions support `all`, `any`, `not`, and leaf operators `eq`, `neq`, `gt`,
 `gte`, `lt`, `lte`, `in`, and `exists`. Rules are evaluated in order and the
 first match wins.
 
+Every `state.include` entry must be an exact declared input field, or a child
+of a field explicitly declared as an object. Selecting an undeclared parent is
+rejected at compile time so sibling fields cannot hitchhike into model state.
+
 ## Evaluation
 
 Evaluate held-out, human-reviewed rows rather than guessing thresholds:
@@ -197,8 +206,11 @@ jev-workflow eval workflow.lock.json --dataset cases.jsonl --live \
   --max-calls 200 --target 0.95 --out evaluation.json
 ```
 
-Reports include accuracy, Brier score, ECE, and high-confidence errors. Export
-to [jevcal](https://github.com/abhixhek/jevcal) with:
+Reports include accuracy, Brier score, ECE, high-confidence errors, prediction
+coverage, label coverage, and missing row identifiers. Unknown labels, unknown
+answers, malformed predictions, and duplicate dataset identifiers are rejected
+instead of being silently ignored. Export to
+[jevcal](https://github.com/abhixhek/jevcal) with:
 
 ```bash
 jev-workflow export-jevcal workflow.lock.json \

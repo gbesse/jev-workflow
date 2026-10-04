@@ -1,4 +1,4 @@
-import { createPublicKey, generateKeyPairSync, sign, verify } from "node:crypto";
+import { createHash, createPublicKey, generateKeyPairSync, sign, verify } from "node:crypto";
 import type {
   CompiledWorkflow,
   DataClassification,
@@ -29,7 +29,12 @@ function classificationFor(path: string, classifications: Record<string, DataCla
   const candidate = Object.entries(classifications)
     .filter(([rule]) => matches(path, rule))
     .sort(([a], [b]) => b.length - a.length)[0];
-  return candidate?.[1] ?? (path === "_derived" || path.startsWith("_derived.") ? "internal" : "unclassified");
+  return candidate?.[1] ?? "unclassified";
+}
+
+function publicKeyFingerprint(key: string): string {
+  const der = createPublicKey(key).export({ type: "spki", format: "der" });
+  return createHash("sha256").update(der).digest("hex");
 }
 
 export function createEgressPlan(artifact: CompiledWorkflow, state: JsonObject, createdAt = new Date().toISOString()): EgressPlan {
@@ -85,13 +90,18 @@ export function signEgressPlan(plan: EgressPlan, privateKey: string): SignedEgre
     signature: {
       algorithm: "Ed25519",
       value: sign(null, Buffer.from(body), privateKey).toString("base64"),
-      publicKeyFingerprint: sha256(publicKey),
+      publicKeyFingerprint: publicKeyFingerprint(publicKey),
     },
   };
 }
 
 export function verifyEgressManifest(manifest: SignedEgressManifest, publicKey: string): boolean {
-  const expectedHash = sha256((({ manifestHash: _ignored, ...rest }) => rest)(manifest.plan) as unknown as JsonValue);
-  if (expectedHash !== manifest.plan.manifestHash || sha256(publicKey) !== manifest.signature.publicKeyFingerprint) return false;
-  return verify(null, Buffer.from(canonicalJson(manifest.plan as unknown as JsonValue)), publicKey, Buffer.from(manifest.signature.value, "base64"));
+  try {
+    if (manifest.signature.algorithm !== "Ed25519") return false;
+    const expectedHash = sha256((({ manifestHash: _ignored, ...rest }) => rest)(manifest.plan) as unknown as JsonValue);
+    if (expectedHash !== manifest.plan.manifestHash || publicKeyFingerprint(publicKey) !== manifest.signature.publicKeyFingerprint) return false;
+    return verify(null, Buffer.from(canonicalJson(manifest.plan as unknown as JsonValue)), publicKey, Buffer.from(manifest.signature.value, "base64"));
+  } catch {
+    return false;
+  }
 }

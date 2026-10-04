@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { stringify } from "yaml";
 import { runPreflight } from "./preflight.js";
+import { validateSystemOneResult } from "./provider.js";
 import type {
   Answer,
   CompiledWorkflow,
@@ -18,8 +19,12 @@ export async function loadDataset(path: string): Promise<EvaluationRow[]> {
     ? text.split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line) as unknown)
     : JSON.parse(text) as unknown[];
   if (!Array.isArray(values)) throw new Error("dataset must be a JSON array or JSONL rows");
+  const ids = new Set<string>();
   return values.map((raw, index) => {
     if (!isObject(raw) || typeof raw.id !== "string" || !isObject(raw.labels)) throw new Error(`dataset row ${index} is invalid`);
+    if (raw.id.length === 0) throw new Error(`dataset row ${index}.id must not be empty`);
+    if (ids.has(raw.id)) throw new Error(`dataset row ${index}.id is duplicated: ${raw.id}`);
+    ids.add(raw.id);
     assertJsonObject(raw.input, `dataset row ${index}.input`);
     const labels: Record<string, string | number | boolean> = {};
     for (const [key, value] of Object.entries(raw.labels)) {
@@ -88,10 +93,30 @@ export function evaluatePredictions(
   predictions: Record<string, SystemOneResult>,
   targetAccuracy = 0.95,
 ): JsonObject {
+  const rowIds = new Set(rows.map((row) => row.id));
+  for (const row of rows) {
+    for (const questionId of Object.keys(row.labels)) {
+      if (!artifact.questions[questionId]) throw new Error(`dataset row ${row.id} labels unknown question: ${questionId}`);
+    }
+  }
+  for (const [rowId, prediction] of Object.entries(predictions)) {
+    if (!rowIds.has(rowId)) throw new Error(`prediction references unknown dataset id: ${rowId}`);
+    if (!isObject(prediction) || !isObject(prediction.answers) || Object.keys(prediction.answers).length === 0) throw new Error(`prediction ${rowId} must contain at least one answer`);
+    const questions: Record<string, Question> = {};
+    for (const questionId of Object.keys(prediction.answers)) {
+      const question = artifact.questions[questionId];
+      if (!question) throw new Error(`prediction ${rowId} answers unknown question: ${questionId}`);
+      questions[questionId] = question;
+    }
+    validateSystemOneResult(prediction, { model: artifact.model, state: {}, questions });
+  }
   const byQuestion: JsonObject = {};
   const all: ScoredPrediction[] = [];
+  let totalLabels = 0;
   for (const [questionId, question] of Object.entries(artifact.questions)) {
     const records: ScoredPrediction[] = [];
+    const labeled = rows.filter((row) => row.labels[questionId] !== undefined);
+    totalLabels += labeled.length;
     for (const row of rows) {
       const label = row.labels[questionId];
       const answer = predictions[row.id]?.answers[questionId];
@@ -101,7 +126,9 @@ export function evaluatePredictions(
     all.push(...records);
     const selected = thresholdReport(records, targetAccuracy);
     byQuestion[questionId] = {
-      labeled: records.length,
+      labeled: labeled.length,
+      predicted: records.length,
+      coverage: labeled.length ? records.length / labeled.length : null,
       accuracy: records.length ? records.filter((row) => row.correct).length / records.length : null,
       brier: records.length ? records.reduce((sum, row) => sum + row.brier, 0) / records.length : null,
       ece: ece(records),
@@ -110,13 +137,21 @@ export function evaluatePredictions(
       confidentErrors: records.filter((row) => !row.correct && row.confidence >= 0.9).map((row) => row.id),
     };
   }
+  const missingPredictions = rows.filter((row) => !predictions[row.id]).map((row) => row.id);
+  const warnings = [
+    rows.length < 100 ? "Small sample: thresholds are exploratory and must not be treated as calibrated production guarantees." : null,
+    missingPredictions.length ? `Missing predictions for ${missingPredictions.length} dataset row(s).` : null,
+  ].filter(Boolean);
   return {
     workflow: { name: artifact.name, policyVersion: artifact.policyVersion, fingerprint: artifact.fingerprint },
     dataset: { rows: rows.length, sha256: sha256(rows as unknown as JsonObject) },
     predictions: Object.keys(predictions).length,
+    predictionCoverage: rows.length ? (rows.length - missingPredictions.length) / rows.length : null,
+    labelCoverage: totalLabels ? all.length / totalLabels : null,
+    missingPredictions,
     overallAccuracy: all.length ? all.filter((row) => row.correct).length / all.length : null,
     byQuestion,
-    warning: rows.length < 100 ? "Small sample: thresholds are exploratory and must not be treated as calibrated production guarantees." : null,
+    warning: warnings.length ? warnings.join(" ") : null,
   };
 }
 

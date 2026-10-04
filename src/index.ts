@@ -6,6 +6,6 @@ export { FixtureProvider, TypeSafeProvider, validateSystemOneResult } from "./pr
 export { executeWorkflow } from "./runtime.js";
 export { fuzzWorkflow } from "./fuzz.js";
 export { createDecisionTrace, appendDecisionTrace, readDecisionTrace, traceToRegressionCase } from "./trace.js";
-export { stabilizeDecision } from "./stability.js";
+export { stabilizeDecision, validateStabilityState } from "./stability.js";
 export { createEgressPlan, enforceEgress, generateEgressKeyPair, signEgressPlan, verifyEgressManifest } from "./egress.js";
 export type * from "./types.js";

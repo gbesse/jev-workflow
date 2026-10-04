@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { basename, dirname, resolve } from "node:path";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import {
   compileWorkflow,
   lintWorkflow,
@@ -15,9 +15,11 @@ import { createEgressPlan, generateEgressKeyPair, signEgressPlan, verifyEgressMa
 import { fuzzWorkflow } from "./fuzz.js";
 import { runPreflight } from "./preflight.js";
 import { readDecisionTrace, traceToRegressionCase } from "./trace.js";
+import { validateStabilityState } from "./stability.js";
 import type { CompiledWorkflow, FuzzMutationName, SignedEgressManifest, StabilityState, SystemOneResult } from "./types.js";
+import { canonicalJson } from "./utils.js";
 
-const VERSION = "0.2.1";
+const VERSION = "0.2.2";
 
 function usage(): string {
   return `jev-workflow ${VERSION} — compile and run auditable Jev policies
@@ -81,7 +83,7 @@ async function writeJson(path: string, value: unknown, mode = 0o644): Promise<vo
 }
 
 async function readStabilityState(path: string): Promise<StabilityState | undefined> {
-  try { return JSON.parse(await readFile(path, "utf8")) as StabilityState; }
+  try { return validateStabilityState(JSON.parse(await readFile(path, "utf8")) as unknown); }
   catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     throw error;
@@ -107,11 +109,17 @@ async function main(): Promise<number> {
   if (command === "egress-keygen") {
     const privatePath = resolve(required(args, "private"));
     const publicPath = resolve(required(args, "public"));
+    if (privatePath === publicPath) throw new Error("private and public key paths must be different");
     await mkdir(dirname(privatePath), { recursive: true, mode: 0o700 });
     await mkdir(dirname(publicPath), { recursive: true });
     const keys = generateEgressKeyPair();
     await writeFile(privatePath, keys.privateKey, { encoding: "utf8", mode: 0o600, flag: "wx" });
-    await writeFile(publicPath, keys.publicKey, { encoding: "utf8", mode: 0o644, flag: "wx" });
+    try {
+      await writeFile(publicPath, keys.publicKey, { encoding: "utf8", mode: 0o644, flag: "wx" });
+    } catch (error) {
+      await unlink(privatePath).catch(() => undefined);
+      throw error;
+    }
     process.stdout.write(`${JSON.stringify({ privateKey: privatePath, publicKey: publicPath }, null, 2)}\n`);
     return 0;
   }
@@ -203,7 +211,7 @@ async function main(): Promise<number> {
     const current = await executeWorkflow(artifact, trace.input, await providerFor(args), { audit: false, id: trace.result.receipt.id });
     const comparison = {
       traceId: trace.traceId,
-      sameOutcome: JSON.stringify(current.outcome) === JSON.stringify(trace.result.outcome),
+      sameOutcome: canonicalJson(current.outcome) === canonicalJson(trace.result.outcome),
       previous: { outcome: trace.result.outcome, ruleId: trace.result.decision.ruleId, answers: trace.result.answers },
       current: { outcome: current.outcome, ruleId: current.decision.ruleId, answers: current.answers },
     };
@@ -219,6 +227,7 @@ async function main(): Promise<number> {
   }
   if (command === "egress-plan") {
     const artifact = await artifactFrom(subject);
+    if (!artifact.egress) throw new Error("workflow has no egress policy");
     const input = JSON.parse(await readFile(required(args, "input"), "utf8")) as unknown;
     const plan = createEgressPlan(artifact, runPreflight(artifact, input).state);
     const keyPath = args.options.get("sign-private");

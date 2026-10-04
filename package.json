@@ -1,7 +1,7 @@
 {
   "name": "jev-workflow",
-  "version": "0.2.2",
-  "description": "Decision contracts, adversarial testing, tracing, stability, and privacy controls for TypeSafe Jev.",
+  "version": "0.3.0",
+  "description": "Evidence-bound decision SLOs, contracts, testing, tracing, stability, and privacy controls for TypeSafe Jev.",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/gbesse/jev-workflow.git"
@@ -12,6 +12,8 @@
     "jev",
     "typesafe",
     "decision-engine",
+    "decision-slo",
+    "risk-certificate",
     "adversarial-testing",
     "observability",
     "privacy"

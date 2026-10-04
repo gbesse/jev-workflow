@@ -8,4 +8,17 @@ export { fuzzWorkflow } from "./fuzz.js";
 export { createDecisionTrace, appendDecisionTrace, readDecisionTrace, traceToRegressionCase } from "./trace.js";
 export { stabilizeDecision, validateStabilityState } from "./stability.js";
 export { createEgressPlan, enforceEgress, generateEgressKeyPair, signEgressPlan, verifyEgressManifest } from "./egress.js";
+export {
+  certifyDecisionSlo,
+  compareDecisionCertificates,
+  exactBinomialUpperBound,
+  gateDecision,
+  loadDecisionSloDataset,
+  monitorDecisionSlo,
+  signDecisionCertificate,
+  unwrapDecisionCertificate,
+  validateDecisionCertificate,
+  verifyDecisionCertificateSignature,
+} from "./slo.js";
+export type { CertificationOptions } from "./slo.js";
 export type * from "./types.js";

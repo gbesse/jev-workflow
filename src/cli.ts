@@ -16,10 +16,20 @@ import { fuzzWorkflow } from "./fuzz.js";
 import { runPreflight } from "./preflight.js";
 import { readDecisionTrace, traceToRegressionCase } from "./trace.js";
 import { validateStabilityState } from "./stability.js";
-import type { CompiledWorkflow, FuzzMutationName, SignedEgressManifest, StabilityState, SystemOneResult } from "./types.js";
+import {
+  certifyDecisionSlo,
+  compareDecisionCertificates,
+  gateDecision,
+  loadDecisionSloDataset,
+  monitorDecisionSlo,
+  signDecisionCertificate,
+  unwrapDecisionCertificate,
+  verifyDecisionCertificateSignature,
+} from "./slo.js";
+import type { CompiledWorkflow, DecisionGateInput, FuzzMutationName, SignedEgressManifest, StabilityState, SystemOneResult } from "./types.js";
 import { canonicalJson } from "./utils.js";
 
-const VERSION = "0.2.2";
+const VERSION = "0.3.0";
 
 function usage(): string {
   return `jev-workflow ${VERSION} — compile and run auditable Jev policies
@@ -36,6 +46,10 @@ Usage:
   jev-workflow egress-keygen --private <private.pem> --public <public.pem>
   jev-workflow egress-verify <manifest.json> --public <public.pem>
   jev-workflow export-jevcal <workflow.lock.json> --dataset <rows.jsonl> --out <directory>
+  jev-workflow certify <workflow.lock.json> --dataset <decisions.jsonl> --action <name> --max-risk <0..1> --out <certificate.json> [--sign-private <key.pem>]
+  jev-workflow gate <certificate.json> --decision <decision.json> [--public <key.pem>] [--require-signature]
+  jev-workflow compare-certificates <baseline.json> --candidate <candidate.json> [--public <key.pem>]
+  jev-workflow monitor <certificate.json> --dataset <new-decisions.jsonl> [--public <key.pem>] [--out <report.json>]
 
 Live commands read TYPESAFE_API_KEY from the environment. Use Node's --env-file=.env;
 the CLI never reads or prints an env file itself.
@@ -80,6 +94,19 @@ async function writeJson(path: string, value: unknown, mode = 0o644): Promise<vo
   const destination = resolve(path);
   await mkdir(dirname(destination), { recursive: true });
   await writeFile(destination, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", mode });
+}
+
+function numericOption(args: Args, key: string, fallback?: number): number {
+  const raw = args.options.get(key);
+  if (raw === undefined && fallback !== undefined) return fallback;
+  if (typeof raw !== "string") throw new Error(`--${key} is required`);
+  const value = Number(raw);
+  if (!Number.isFinite(value)) throw new Error(`--${key} must be a number`);
+  return value;
+}
+
+async function readJson(path: string): Promise<unknown> {
+  return JSON.parse(await readFile(path, "utf8")) as unknown;
 }
 
 async function readStabilityState(path: string): Promise<StabilityState | undefined> {
@@ -139,6 +166,65 @@ async function main(): Promise<number> {
     await writeCompiledWorkflow(out, artifact);
     process.stdout.write(`${JSON.stringify({ output: out, fingerprint: artifact.fingerprint, findings }, null, 2)}\n`);
     return 0;
+  }
+  if (command === "certify") {
+    const artifact = await artifactFrom(subject);
+    const certificate = certifyDecisionSlo(artifact, await loadDecisionSloDataset(required(args, "dataset")), {
+      action: required(args, "action"),
+      maxRisk: numericOption(args, "max-risk"),
+      confidence: numericOption(args, "confidence", 0.95),
+      minimumCoverage: numericOption(args, "min-coverage", 0),
+      calibrationFraction: numericOption(args, "calibration-fraction", 0.5),
+      split: String(args.options.get("split") ?? "ordered") as "ordered" | "time",
+      slices: typeof args.options.get("slices") === "string" ? String(args.options.get("slices")).split(",").filter(Boolean) : [],
+      minSliceSize: numericOption(args, "min-slice-size", 20),
+      validityDays: numericOption(args, "validity-days", 30),
+    });
+    const keyPath = args.options.get("sign-private");
+    const output = typeof keyPath === "string" ? signDecisionCertificate(certificate, await readFile(keyPath, "utf8")) : certificate;
+    const destination = resolve(required(args, "out"));
+    await writeJson(destination, output);
+    process.stdout.write(`${JSON.stringify({ output: destination, certificateId: certificate.certificateId, status: certificate.status, threshold: certificate.slo.threshold, signed: typeof keyPath === "string" }, null, 2)}\n`);
+    return certificate.status === "certified" ? 0 : 2;
+  }
+  if (command === "gate") {
+    const { certificate, signed } = unwrapDecisionCertificate(await readJson(subject));
+    const decision = await readJson(required(args, "decision")) as DecisionGateInput;
+    const publicPath = args.options.get("public");
+    const requireSignature = args.options.has("require-signature") || signed !== null || typeof publicPath === "string";
+    const signatureValid = signed && typeof publicPath === "string"
+      ? verifyDecisionCertificateSignature(signed, await readFile(publicPath, "utf8"))
+      : false;
+    const result = gateDecision(certificate, decision, { requireSignature, signatureValid });
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    return result.decision === "permit" ? 0 : 2;
+  }
+  if (command === "compare-certificates") {
+    const baselineValue = unwrapDecisionCertificate(await readJson(subject));
+    const candidateValue = unwrapDecisionCertificate(await readJson(required(args, "candidate")));
+    const publicPath = args.options.get("public");
+    if (typeof publicPath === "string") {
+      const publicKey = await readFile(publicPath, "utf8");
+      if (!baselineValue.signed || !candidateValue.signed) throw new Error("--public requires both certificates to be signed");
+      if (!verifyDecisionCertificateSignature(baselineValue.signed, publicKey) || !verifyDecisionCertificateSignature(candidateValue.signed, publicKey)) throw new Error("certificate signature verification failed");
+    }
+    const baseline = baselineValue.certificate;
+    const candidate = candidateValue.certificate;
+    const result = compareDecisionCertificates(baseline, candidate);
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    return result.regression === true ? 2 : 0;
+  }
+  if (command === "monitor") {
+    const value = unwrapDecisionCertificate(await readJson(subject));
+    const publicPath = args.options.get("public");
+    if (typeof publicPath === "string") {
+      if (!value.signed || !verifyDecisionCertificateSignature(value.signed, await readFile(publicPath, "utf8"))) throw new Error("certificate signature verification failed");
+    }
+    const certificate = value.certificate;
+    const report = monitorDecisionSlo(certificate, await loadDecisionSloDataset(required(args, "dataset")));
+    if (typeof args.options.get("out") === "string") await writeJson(String(args.options.get("out")), report);
+    process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+    return report.status === "revoke" ? 2 : 0;
   }
   if (command === "run") {
     const artifact = await artifactFrom(subject);

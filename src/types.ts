@@ -321,3 +321,93 @@ export interface DecisionTrace {
   input?: JsonObject;
   result: ExecutionResult;
 }
+
+export interface DecisionSloRow {
+  id: string;
+  action: string;
+  score: number;
+  correct: boolean;
+  timestamp?: string;
+  slices?: Record<string, string>;
+}
+
+export interface RiskEvidence {
+  rows: number;
+  selected: number;
+  errors: number;
+  coverage: number;
+  empiricalRisk: number | null;
+  upperRiskBound: number | null;
+  confidence: number;
+}
+
+export interface SliceRiskEvidence extends RiskEvidence {
+  field: string;
+  value: string;
+  eligible: boolean;
+}
+
+export interface DecisionCertificate {
+  version: 1;
+  certificateId: string;
+  createdAt: string;
+  expiresAt: string;
+  status: "certified" | "rejected" | "insufficient";
+  workflow: { name: string; policyVersion: string; fingerprint: string; model: string };
+  slo: {
+    action: string;
+    maxRisk: number;
+    confidence: number;
+    minimumCoverage: number;
+    threshold: number | null;
+    slices: string[];
+    minSliceSize: number;
+  };
+  dataset: {
+    sha256: string;
+    rows: number;
+    calibrationRows: number;
+    validationRows: number;
+    split: "ordered" | "time";
+  };
+  evidence: {
+    calibration: RiskEvidence | null;
+    validation: RiskEvidence | null;
+    slices: SliceRiskEvidence[];
+    familyWiseConfidence: number;
+  };
+  reasons: string[];
+}
+
+export interface SignedDecisionCertificate {
+  certificate: DecisionCertificate;
+  signature: { algorithm: "Ed25519"; value: string; publicKeyFingerprint: string };
+}
+
+export interface DecisionGateInput {
+  workflowFingerprint: string;
+  action: string;
+  score: number;
+}
+
+export interface DecisionGateResult {
+  decision: "permit" | "review";
+  certificateId: string;
+  reasons: string[];
+  threshold: number | null;
+  score: number;
+}
+
+export interface DecisionMonitorReport {
+  version: 1;
+  certificateId: string;
+  status: "healthy" | "warning" | "revoke";
+  observed: number;
+  errors: number;
+  empiricalRisk: number | null;
+  anytimeLowerBound: number | null;
+  maxRisk: number;
+  confidence: number;
+  firstBreachAt: number | null;
+  reasons: string[];
+}

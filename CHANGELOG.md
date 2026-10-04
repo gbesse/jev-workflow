@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.0
+
+- Add Decision SLO calibration and fixed-holdout certification with exact
+  one-sided binomial risk bounds and minimum coverage requirements.
+- Add family-wise corrected per-slice evidence with explicit minimum sample
+  sizes and insufficient-evidence handling.
+- Add checksummed, expiring, optionally Ed25519-signed decision certificates.
+- Add a fail-closed runtime gate bound to workflow fingerprint, action, score,
+  certificate status, expiry, and signature policy.
+- Add conservative certificate comparison for CI and an anytime-valid
+  sequential breach monitor for newly labeled production decisions.
+- Add a synthetic offline Decision SLO example to the French SAV pack.
+
 ## 0.2.2
 
 - Prevent parent state selectors from transmitting undeclared sibling fields.

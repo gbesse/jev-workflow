@@ -1,21 +1,25 @@
 # jev-workflow
 
-Decision contracts, adversarial testing, flight recording, temporal stability,
-and privacy controls for [TypeSafe Jev](https://typesafe.ai/).
+Evidence-bound decision SLOs, contracts, adversarial testing, flight recording,
+temporal stability, and privacy controls for
+[TypeSafe Jev](https://typesafe.ai/).
 
 > Early public release. The APIs are usable and tested, but the project has not
 > yet been independently security-audited. Jev decisions remain probabilistic;
 > permissions and irreversible actions must stay in deterministic code.
 
 ```text
-input ──> deterministic preflight ──> egress policy ──> Jev questions
-  │                                      │                   │
-  │                                      └── signed plan     ▼
-  │                                                bounded routing
-  │                                                      │
-  └── fuzz mutations           trace + replay <──────────┤
-                                                         ▼
-                                             temporal stability gate
+historical labeled decisions ──> calibrate ──> fixed holdout
+                                             │
+                                             └── signed risk certificate
+                                                        │
+input ──> preflight ──> egress policy ──> Jev ──> bounded routing
+                                                        │
+                                    fingerprint + score + action
+                                                        ▼
+                                             certificate gate
+                                              │           │
+                                           permit       review
 ```
 
 ## Why
@@ -28,12 +32,98 @@ The useful contract is not “the model usually answers correctly.” It is:
 - every decision can be traced and replayed;
 - noisy repeated decisions cannot make an actuator flap;
 - uncertain results lead to a bounded fallback.
+- automated actions consume a finite error budget backed by held-out evidence.
 
 `jev-workflow` compiles that contract from YAML into a fingerprinted artifact.
 Compiled artifacts are fully revalidated when loaded; the fingerprint is an
 integrity checksum, not a cryptographic signature or authorization mechanism.
 
-## Four operational modules
+## Decision SLO: certify before automating
+
+`certify` learns an action threshold on a calibration split, then evaluates it
+once on a fixed holdout. It issues a checksummed certificate only when the
+one-sided exact binomial risk bound (Clopper–Pearson), coverage target, and all
+requested slice checks pass. Slice claims receive a Bonferroni family-wise
+correction.
+
+Each input row is a labeled historical decision. `score` is the application's
+declared scalar for this action; `correct` means that the action was correct
+after review or known outcome. Deriving that score and label is intentionally
+application-specific and must remain stable across certification and runtime.
+
+```json
+{"id":"case-42","action":"auto_approve","score":0.97,"correct":true,"timestamp":"2026-09-03T08:00:00Z","slices":{"region":"eu"}}
+```
+
+```bash
+jev-workflow compile packs/sav-fr/policy.yaml --out output/sav-fr.lock.json
+
+jev-workflow certify output/sav-fr.lock.json \
+  --dataset packs/sav-fr/slo-decisions.jsonl \
+  --action approval_required --max-risk 0.20 --min-coverage 0.80 \
+  --confidence 0.95 --out output/decision-certificate.json
+```
+
+For a chronological holdout, add `--split time`; every row must then have a
+timestamp. For production slice claims, use for example
+`--slices region,channel --min-slice-size 100`. A slice without enough selected
+decisions makes the certificate insufficient rather than silently dropping the
+claim.
+
+Certificates can be signed with an existing Ed25519 key pair:
+
+```bash
+jev-workflow egress-keygen --private .jev/certificate-private.pem \
+  --public .jev/certificate-public.pem
+
+jev-workflow certify output/sav-fr.lock.json \
+  --dataset packs/sav-fr/slo-decisions.jsonl \
+  --action approval_required --max-risk 0.20 --min-coverage 0.80 \
+  --out output/signed-certificate.json \
+  --sign-private .jev/certificate-private.pem
+```
+
+The runtime gate fails closed on status, expiry, workflow fingerprint, action,
+threshold, and—when a signed certificate is supplied—signature verification:
+
+```json
+{"workflowFingerprint":"<compiled fingerprint>","action":"approval_required","score":0.96}
+```
+
+```bash
+jev-workflow gate output/signed-certificate.json \
+  --decision decision.json --public .jev/certificate-public.pem
+```
+
+Exit code `0` means `permit`; exit code `2` means `review`. Require a signature
+even for an unsigned input with `--require-signature`.
+
+Use a conservative CI comparison and an ongoing breach monitor:
+
+```bash
+jev-workflow compare-certificates baseline.json --candidate candidate.json
+jev-workflow monitor output/decision-certificate.json \
+  --dataset newly-labeled-decisions.jsonl --out output/monitor.json
+```
+
+Comparison exits `2` for a non-certified candidate, weakened SLO, lower
+validated coverage, or higher validated upper risk bound. Monitoring consumes
+newly labeled decisions in file order and exits `2` only when an anytime-valid
+Hoeffding lower bound establishes that risk exceeded the certificate budget;
+warnings remain exit `0`. Pass `--public` to either command to verify signed
+certificate inputs.
+
+The certificate is evidence about the supplied workload under binomial
+sampling and representative-holdout assumptions—not a universal safety,
+security, legal, or causal guarantee. Distribution shift, label leakage,
+dependent observations, delayed labels, or a changed score definition can
+invalidate the claim. Monitoring detects some breaches; it does not recertify
+the system.
+
+The bundled 40-row SLO dataset is synthetic and intentionally permissive so the
+offline workflow is reproducible. It is not evidence for production use.
+
+## Operational modules
 
 ### DecisionFuzz
 
@@ -230,6 +320,10 @@ and edge cases. It is not a production benchmark.
 - A valid typed answer can still be wrong. Test confident errors on the exact
   workload and retain human review for consequential decisions.
 - Stability delays change; it does not prove that the stable decision is safe.
+- A certificate checksum detects accidental modification; it does not establish
+  provenance. Require and verify an Ed25519 signature across trust boundaries.
+- Certification depends on representative, independently labeled holdout data.
+  Reusing the holdout for repeated tuning invalidates its stated confidence.
 
 See [SECURITY.md](SECURITY.md) for reporting instructions and the threat model.
 

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { stabilizeDecision } from "../src/stability.js";
+import { stabilizeDecision, validateStabilityState } from "../src/stability.js";
 
 test("stability holds jitter until consecutive evidence and dwell time are satisfied", () => {
   const spec = { minConsecutive: 2, minDwellMs: 1_000, cooldownMs: 1_000 };
@@ -11,6 +11,11 @@ test("stability holds jitter until consecutive evidence and dwell time are satis
   const switched = stabilizeDecision({ action: "block" }, held.state, spec, "2026-09-25T10:00:01.500Z");
   assert.equal(switched.status, "switched");
   assert.equal(switched.emittedOutcome.action, "block");
+});
+
+test("stability rejects corrupt or self-inconsistent persisted state", () => {
+  assert.throws(() => validateStabilityState({ stableOutcome: {}, stableSince: "bad", lastChangedAt: "bad", candidateCount: 0 }), /stableSince/);
+  assert.throws(() => validateStabilityState({ stableOutcome: {}, stableSince: "2026-09-25T10:00:00Z", lastChangedAt: "2026-09-25T10:00:00Z", candidateCount: 2 }), /inconsistent/);
 });
 
 test("stability resets a pending candidate when the stable outcome returns", () => {

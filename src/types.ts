@@ -217,7 +217,12 @@ export interface ExecutionResult {
   workflow: { name: string; policyVersion: string; fingerprint: string };
   providerModel: string;
   outcome: JsonObject;
-  decision: { ruleId: string | null; reason: string; uncertainQuestions: string[] };
+  decision: {
+    ruleId: string | null;
+    reason: string;
+    uncertainQuestions: string[];
+    proposed?: { ruleId: string | null; reason: string; outcome: JsonObject };
+  };
   answers: Record<string, Answer>;
   preflight: Pick<PreflightResult, "derived" | "findings" | "signals">;
   receipt: {

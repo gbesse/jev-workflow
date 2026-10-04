@@ -33,6 +33,14 @@ test("egress rejects denied or unclassified fields and signs an immutable manife
   const keys = generateEgressKeyPair();
   const signed = signEgressPlan(plan, keys.privateKey);
   assert.equal(verifyEgressManifest(signed, keys.publicKey), true);
+  assert.equal(verifyEgressManifest(signed, `${keys.publicKey.trim()}\n\n`), true);
   signed.plan.fields[0]!.path = "tampered";
   assert.equal(verifyEgressManifest(signed, keys.publicKey), false);
+});
+
+test("explicit classification also applies to deterministic derived fields", () => {
+  const artifact = compileWorkflow({ ...base, egress: { requireExplicitClassification: true } });
+  const plan = createEgressPlan(artifact, { _derived: { risk: true }, message: "hello" });
+  assert.equal(plan.permitted, false);
+  assert.match(plan.violations.join(" "), /_derived.risk.*explicit classification/);
 });

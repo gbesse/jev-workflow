@@ -4,7 +4,7 @@ import type {
   QuestionSpec,
   WorkflowSpec,
 } from "./types.js";
-import { isJsonValue, isObject } from "./utils.js";
+import { assertSafePath, isJsonValue, isObject } from "./utils.js";
 
 const FIELD_TYPES = new Set(["string", "number", "boolean", "datetime", "object", "array"]);
 const QUESTION_TYPES = new Set(["choice", "noul", "score"]);
@@ -16,6 +16,20 @@ function fail(path: string, message: string): never {
 
 function nonEmptyString(value: unknown, path: string): asserts value is string {
   if (typeof value !== "string" || value.trim().length === 0) fail(path, "must be a non-empty string");
+}
+
+function dataPath(value: unknown, path: string, allowWildcard = false): asserts value is string {
+  nonEmptyString(value, path);
+  const normalized = allowWildcard && value.endsWith(".*") ? value.slice(0, -2) : value;
+  try { assertSafePath(normalized); }
+  catch (error) { fail(path, error instanceof Error ? error.message : String(error)); }
+}
+
+function identifier(value: unknown, path: string): asserts value is string {
+  nonEmptyString(value, path);
+  if (!/^[A-Za-z_][A-Za-z0-9_-]*$/.test(value)) fail(path, "must contain only letters, digits, underscore, or dash and may not start with a digit");
+  try { assertSafePath(value); }
+  catch (error) { fail(path, error instanceof Error ? error.message : String(error)); }
 }
 
 function stringArray(value: unknown, path: string): asserts value is string[] {
@@ -70,7 +84,7 @@ function validateCondition(value: unknown, path: string): asserts value is Condi
     children.forEach((child, index) => validateCondition(child, `${path}.${key}[${index}]`));
     return;
   }
-  nonEmptyString(value.path, `${path}.path`);
+  dataPath(value.path, `${path}.path`);
   if (typeof value.op !== "string" || !CONDITION_OPERATORS.has(value.op)) fail(`${path}.op`, "invalid operator");
   if (value.op !== "exists" && !("value" in value)) fail(`${path}.value`, "is required");
   if ("value" in value && !isJsonValue(value.value)) fail(`${path}.value`, "must be JSON-compatible");
@@ -86,17 +100,19 @@ export function validateWorkflowSpec(value: unknown): asserts value is WorkflowS
 
   if (!isObject(value.input) || Object.keys(value.input).length === 0) fail("input", "must define at least one field");
   for (const [path, raw] of Object.entries(value.input)) {
-    nonEmptyString(path, "input field path");
+    dataPath(path, "input field path");
     if (!isObject(raw) || typeof raw.type !== "string" || !FIELD_TYPES.has(raw.type)) fail(`input.${path}`, "invalid field type");
     if (raw.required !== undefined && typeof raw.required !== "boolean") fail(`input.${path}.required`, "must be boolean");
   }
 
   if (!isObject(value.state)) fail("state", "must be an object");
   stringArray(value.state.include, "state.include");
+  value.state.include.forEach((path, index) => dataPath(path, `state.include[${index}]`));
 
   if (!isObject(value.questions) || Object.keys(value.questions).length === 0) fail("questions", "must not be empty");
   for (const [id, question] of Object.entries(value.questions)) {
-    if (!/^[A-Za-z][A-Za-z0-9_.-]*$/.test(id)) fail(`questions.${id}`, "id must start with a letter and contain only letters, digits, dot, underscore, or dash");
+    identifier(id, `questions.${id}`);
+    if (!/^[A-Za-z]/.test(id)) fail(`questions.${id}`, "id must start with a letter");
     validateQuestion(question, `questions.${id}`);
   }
 
@@ -122,7 +138,10 @@ export function validateWorkflowSpec(value: unknown): asserts value is WorkflowS
     if (!isObject(value.audit)) fail("audit", "must be an object");
     if (value.audit.path !== undefined) nonEmptyString(value.audit.path, "audit.path");
     if (value.audit.includeInput !== undefined && typeof value.audit.includeInput !== "boolean") fail("audit.includeInput", "must be boolean");
-    if (value.audit.redact !== undefined) stringArray(value.audit.redact, "audit.redact");
+    if (value.audit.redact !== undefined) {
+      stringArray(value.audit.redact, "audit.redact");
+      value.audit.redact.forEach((path, index) => dataPath(path, `audit.redact[${index}]`));
+    }
   }
   validateStability(value.stability);
   validateEgress(value.egress);
@@ -140,8 +159,14 @@ function validateStability(value: unknown): void {
 function validateEgress(value: unknown): void {
   if (value === undefined) return;
   if (!isObject(value)) fail("egress", "must be an object");
-  if (value.allow !== undefined) stringArray(value.allow, "egress.allow");
-  if (value.deny !== undefined) stringArray(value.deny, "egress.deny");
+  if (value.allow !== undefined) {
+    stringArray(value.allow, "egress.allow");
+    value.allow.forEach((path, index) => dataPath(path, `egress.allow[${index}]`, true));
+  }
+  if (value.deny !== undefined) {
+    stringArray(value.deny, "egress.deny");
+    value.deny.forEach((path, index) => dataPath(path, `egress.deny[${index}]`, true));
+  }
   if (value.allowClassifications !== undefined) {
     stringArray(value.allowClassifications, "egress.allowClassifications");
     const valid = new Set(["public", "internal", "personal", "sensitive", "secret"]);
@@ -150,7 +175,7 @@ function validateEgress(value: unknown): void {
   if (value.classifications !== undefined) {
     if (!isObject(value.classifications)) fail("egress.classifications", "must be an object");
     for (const [path, classification] of Object.entries(value.classifications)) {
-      nonEmptyString(path, "egress.classifications path");
+      dataPath(path, "egress.classifications path", true);
       if (!["public", "internal", "personal", "sensitive", "secret"].includes(String(classification))) fail(`egress.classifications.${path}`, "invalid classification");
     }
   }
@@ -171,7 +196,7 @@ function validatePreflight(value: unknown): void {
     if (!Array.isArray(value.text)) fail("preflight.text", "must be an array");
     value.text.forEach((raw, index) => {
       if (!isObject(raw)) fail(`preflight.text[${index}]`, "must be an object");
-      nonEmptyString(raw.path, `preflight.text[${index}].path`);
+      dataPath(raw.path, `preflight.text[${index}].path`);
       if (raw.maxCharacters !== undefined && (!Number.isInteger(raw.maxCharacters) || Number(raw.maxCharacters) < 1)) fail(`preflight.text[${index}].maxCharacters`, "must be a positive integer");
       if (raw.normalizeWhitespace !== undefined && typeof raw.normalizeWhitespace !== "boolean") fail(`preflight.text[${index}].normalizeWhitespace`, "must be boolean");
       if (raw.overflow !== undefined && raw.overflow !== "reject" && raw.overflow !== "truncate") fail(`preflight.text[${index}].overflow`, "must be reject or truncate");
@@ -181,21 +206,28 @@ function validatePreflight(value: unknown): void {
     if (!Array.isArray(value.dates)) fail("preflight.dates", "must be an array");
     value.dates.forEach((raw, index) => {
       if (!isObject(raw)) fail(`preflight.dates[${index}]`, "must be an object");
-      ["id", "from", "to"].forEach((key) => nonEmptyString(raw[key], `preflight.dates[${index}].${key}`));
+      identifier(raw.id, `preflight.dates[${index}].id`);
+      dataPath(raw.from, `preflight.dates[${index}].from`);
+      dataPath(raw.to, `preflight.dates[${index}].to`);
     });
   }
   if (value.comparisons !== undefined) {
     if (!Array.isArray(value.comparisons)) fail("preflight.comparisons", "must be an array");
     value.comparisons.forEach((raw, index) => {
       if (!isObject(raw)) fail(`preflight.comparisons[${index}]`, "must be an object");
-      ["id", "path", "op"].forEach((key) => nonEmptyString(raw[key], `preflight.comparisons[${index}].${key}`));
+      identifier(raw.id, `preflight.comparisons[${index}].id`);
+      dataPath(raw.path, `preflight.comparisons[${index}].path`);
+      nonEmptyString(raw.op, `preflight.comparisons[${index}].op`);
       if (!["gt", "gte", "lt", "lte", "eq", "neq"].includes(String(raw.op))) fail(`preflight.comparisons[${index}].op`, "invalid comparison");
       if (!["string", "number", "boolean"].includes(typeof raw.value)) fail(`preflight.comparisons[${index}].value`, "must be scalar");
     });
   }
   if (value.security !== undefined) {
     if (!isObject(value.security)) fail("preflight.security", "must be an object");
-    if (value.security.scanPaths !== undefined) stringArray(value.security.scanPaths, "preflight.security.scanPaths");
+    if (value.security.scanPaths !== undefined) {
+      stringArray(value.security.scanPaths, "preflight.security.scanPaths");
+      value.security.scanPaths.forEach((path, index) => dataPath(path, `preflight.security.scanPaths[${index}]`));
+    }
     for (const key of ["detectPii", "detectInstructionInjection"]) {
       if (value.security[key] !== undefined && typeof value.security[key] !== "boolean") fail(`preflight.security.${key}`, "must be boolean");
     }

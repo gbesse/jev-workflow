@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { compileWorkflow, loadWorkflowSpec } from "../src/compiler.js";
@@ -21,6 +21,29 @@ test("evaluation reports calibration-facing metrics and confident errors", () =>
   const urgent = (report.byQuestion as JsonObject).urgent as JsonObject;
   assert.deepEqual(urgent.confidentErrors, ["b"]);
   assert.match(String(report.warning), /Small sample/);
+});
+
+test("evaluation exposes missing prediction coverage and rejects unknown answers", () => {
+  const rows = [
+    { id: "a", input: {} as JsonObject, labels: { urgent: true } },
+    { id: "b", input: {} as JsonObject, labels: { urgent: false } },
+  ];
+  const partial: SystemOneResult = { model: "fixture", answers: { urgent: { type: "noul", noul: 0.8 } }, usage: { input_tokens: 1, output_tokens: 1 } };
+  const report = evaluatePredictions(artifact, rows, { a: partial });
+  assert.equal(report.predictionCoverage, 0.5);
+  assert.equal(report.labelCoverage, 0.5);
+  assert.deepEqual(report.missingPredictions, ["b"]);
+  assert.match(String(report.warning), /Missing predictions/);
+
+  const unknown: SystemOneResult = { model: "fixture", answers: { invented: { type: "noul", noul: 0.8 } }, usage: { input_tokens: 1, output_tokens: 1 } };
+  assert.throws(() => evaluatePredictions(artifact, rows, { a: unknown }), /unknown question/);
+});
+
+test("dataset loading rejects duplicate identifiers", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "jev-dataset-"));
+  const path = join(directory, "duplicate.jsonl");
+  await writeFile(path, '{"id":"same","input":{},"labels":{}}\n{"id":"same","input":{},"labels":{}}\n');
+  await assert.rejects(loadDataset(path), /duplicated/);
 });
 
 test("export emits jevcal-native questions and state/labels JSONL", async () => {

@@ -2,7 +2,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { parse } from "yaml";
 import { validateWorkflowSpec } from "./schema.js";
 import type { CompiledWorkflow, JsonObject, LintFinding, Question, WorkflowSpec } from "./types.js";
-import { sha256 } from "./utils.js";
+import { canonicalJson, isObject, sha256 } from "./utils.js";
 
 const COMPILER = "jev-workflow@0.2.0" as const;
 
@@ -25,8 +25,9 @@ export function lintWorkflow(spec: WorkflowSpec): LintFinding[] {
   ]);
   const inputPaths = new Set(Object.keys(spec.input));
   for (const path of spec.state.include) {
-    if (!inputPaths.has(path) && ![...inputPaths].some((candidate) => candidate.startsWith(`${path}.`))) {
-      findings.push({ code: "W001", severity: "warning", location: "state.include", message: `${path} is not declared in input` });
+    const declaredAncestor = Object.entries(spec.input).some(([candidate, field]) => field.type === "object" && path.startsWith(`${candidate}.`));
+    if (!inputPaths.has(path) && !declaredAncestor) {
+      findings.push({ code: "P004", severity: "error", location: "state.include", message: `${path} must be an exact input field or a child of a declared object field` });
     }
   }
   for (const [id, question] of Object.entries(spec.questions)) {
@@ -62,6 +63,7 @@ export function lintWorkflow(spec: WorkflowSpec): LintFinding[] {
 }
 
 export function compileWorkflow(spec: WorkflowSpec): CompiledWorkflow {
+  validateWorkflowSpec(spec);
   const errors = lintWorkflow(spec).filter((finding) => finding.severity === "error");
   if (errors.length > 0) throw new Error(errors.map((finding) => `${finding.code} ${finding.location}: ${finding.message}`).join("\n"));
   const questions: Record<string, Question> = {};
@@ -93,14 +95,40 @@ export function compileWorkflow(spec: WorkflowSpec): CompiledWorkflow {
 }
 
 export function validateCompiledWorkflow(raw: unknown): CompiledWorkflow {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("compiled workflow must be an object");
-  const artifact = raw as CompiledWorkflow;
+  if (!isObject(raw)) throw new Error("compiled workflow must be an object");
+  const artifact = raw as unknown as CompiledWorkflow;
   if (artifact.artifactVersion !== 1 || artifact.compiler !== COMPILER || typeof artifact.fingerprint !== "string") {
     throw new Error("unsupported compiled workflow");
   }
   const { fingerprint, ...unsigned } = artifact;
   const expected = sha256(unsigned as unknown as JsonObject);
   if (fingerprint !== expected) throw new Error("compiled workflow fingerprint mismatch; recompile the policy");
+  if (!isObject(artifact.questions) || !isObject(artifact.guards)) throw new Error("compiled workflow questions and guards must be objects");
+  const questions = Object.fromEntries(Object.entries(artifact.questions).map(([id, question]) => [
+    id,
+    artifact.guards[id] ? { ...question, guard: artifact.guards[id] } : question,
+  ]));
+  const spec = {
+    version: 1,
+    name: artifact.name,
+    policyVersion: artifact.policyVersion,
+    locale: artifact.locale,
+    model: artifact.model,
+    input: artifact.input,
+    state: artifact.state,
+    preflight: artifact.preflight,
+    questions,
+    routing: artifact.routing,
+    audit: artifact.audit,
+    stability: artifact.stability,
+    egress: artifact.egress,
+  } as WorkflowSpec;
+  validateWorkflowSpec(spec);
+  const normalized = compileWorkflow(spec);
+  const { fingerprint: _normalizedFingerprint, ...normalizedUnsigned } = normalized;
+  if (canonicalJson(unsigned as unknown as JsonObject) !== canonicalJson(normalizedUnsigned as unknown as JsonObject)) {
+    throw new Error("compiled workflow is not in canonical form; recompile the policy");
+  }
   return artifact;
 }
 

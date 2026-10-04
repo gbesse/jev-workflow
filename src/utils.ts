@@ -22,6 +22,10 @@ function splitPath(path: string): string[] {
   return parts;
 }
 
+export function assertSafePath(path: string): void {
+  splitPath(path);
+}
+
 function setOwn(target: JsonObject, key: string, value: JsonValue): void {
   Object.defineProperty(target, key, {
     value,

@@ -71,13 +71,25 @@ export async function executeWorkflow(
     reason = matched?.reason ?? "no routing rule matched; used default outcome";
   }
 
+  const proposed = { outcome, ruleId, reason };
   const stability = artifact.stability ? stabilizeDecision(outcome, options.stabilityState, artifact.stability, startedAt) : undefined;
-  if (stability) outcome = stability.emittedOutcome;
+  if (stability) {
+    outcome = stability.emittedOutcome;
+    if (stability.status === "held") {
+      ruleId = null;
+      reason = stability.reason;
+    }
+  }
   const result: ExecutionResult = {
     workflow: { name: artifact.name, policyVersion: artifact.policyVersion, fingerprint: artifact.fingerprint },
     providerModel: providerResult.model,
     outcome,
-    decision: { ruleId, reason, uncertainQuestions },
+    decision: {
+      ruleId,
+      reason,
+      uncertainQuestions,
+      ...(stability?.status === "held" ? { proposed } : {}),
+    },
     answers: providerResult.answers,
     preflight: { derived: preflight.derived, findings: preflight.findings, signals: preflight.signals },
     receipt: {

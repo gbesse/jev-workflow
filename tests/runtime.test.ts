@@ -50,3 +50,21 @@ test("response validation rejects incomplete or incoherent distributions", () =>
   wrongTop.answers.service.choice = "technique";
   assert.throws(() => validateSystemOneResult(wrongTop, request), /top probability/);
 });
+
+test("a held stability gate does not attribute the emitted outcome to the proposed rule", async () => {
+  const result = await executeWorkflow(artifact, input, new FixtureProvider(response), {
+    audit: false,
+    timestamp: "2026-09-25T10:00:10Z",
+    stabilityState: {
+      stableOutcome: { queue: "accueil", priority: "normal", automation: "human_owned" },
+      stableSince: "2026-09-25T10:00:00Z",
+      lastChangedAt: "2026-09-25T10:00:00Z",
+      candidateCount: 0,
+    },
+  });
+  assert.equal(result.stability?.status, "held");
+  assert.equal(result.outcome.queue, "accueil");
+  assert.equal(result.decision.ruleId, null);
+  assert.equal(result.decision.proposed?.ruleId, "high-value-refund");
+  assert.equal(result.decision.proposed?.outcome.queue, "remboursements");
+});

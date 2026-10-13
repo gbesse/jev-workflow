@@ -22,3 +22,6 @@ export {
 } from "./slo.js";
 export type { CertificationOptions } from "./slo.js";
 export type * from "./types.js";
+
+export { buildRiskCard, renderRiskCard, renderRiskBadge } from "./riskcard.js";
+export type { RiskCard, RiskCardLocale, RiskCardStatus } from "./riskcard.js";

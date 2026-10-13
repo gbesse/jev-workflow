@@ -28,8 +28,10 @@ import {
 } from "./slo.js";
 import type { CompiledWorkflow, DecisionGateInput, FuzzMutationName, SignedEgressManifest, StabilityState, SystemOneResult } from "./types.js";
 import { canonicalJson } from "./utils.js";
+import { buildRiskCard, renderRiskCard, renderRiskBadge, riskCardText } from "./riskcard.js";
+import type { RiskCardLocale } from "./riskcard.js";
 
-const VERSION = "0.3.0";
+const VERSION = "0.4.0";
 
 function usage(): string {
   return `jev-workflow ${VERSION} — compile and run auditable Jev policies
@@ -49,6 +51,8 @@ Usage:
   jev-workflow certify <workflow.lock.json> --dataset <decisions.jsonl> --action <name> --max-risk <0..1> --out <certificate.json> [--sign-private <key.pem>]
   jev-workflow gate <certificate.json> --decision <decision.json> [--public <key.pem>] [--require-signature]
   jev-workflow compare-certificates <baseline.json> --candidate <candidate.json> [--public <key.pem>]
+  jev-workflow report <certificate.json> --html <riskcard.html> [--badge <decision-slo.svg>] [--lang fr|en|es] [--public <key.pem>] [--require-signature]
+  FR : rapport de risque · EN: risk report · ES: informe de riesgo
   jev-workflow monitor <certificate.json> --dataset <new-decisions.jsonl> [--public <key.pem>] [--out <report.json>]
 
 Live commands read TYPESAFE_API_KEY from the environment. Use Node's --env-file=.env;
@@ -127,11 +131,47 @@ async function writeStabilityState(path: string, state: StabilityState): Promise
 
 async function main(): Promise<number> {
   const raw = process.argv.slice(2);
+  if (raw[0] === "report" && (raw.includes("--help") || raw.includes("-h"))) {
+    const lang = raw[raw.indexOf("--lang") + 1];
+    const locale = lang === "fr" || lang === "es" ? lang : "en";
+    process.stdout.write(riskCardText[locale].help + "\n" + "jev-workflow report <certificate.json> --html <riskcard.html> [--badge <decision-slo.svg>] [--lang fr|en|es] [--public <key.pem>] [--require-signature]\n");
+    return 0;
+  }
   if (raw.length === 0 || raw.includes("--help") || raw.includes("-h")) { process.stdout.write(usage()); return 0; }
   if (raw.includes("--version") || raw.includes("-v")) { process.stdout.write(`${VERSION}\n`); return 0; }
   const command = raw[0]!;
   const args = parseArgs(raw.slice(1));
   const subject = args.positionals[0];
+
+  if (command === "report") {
+    const rawLocale = args.options.get("lang") ?? "en";
+    const locale: RiskCardLocale = rawLocale === "fr" || rawLocale === "es" ? rawLocale : "en";
+    const text = riskCardText[locale];
+    const created: string[] = [];
+    try {
+      if (!subject || !["fr", "en", "es"].includes(String(rawLocale)) || [...args.options.keys()].some(key => !["html", "badge", "lang", "public", "require-signature"].includes(key))) throw new Error();
+      const card = buildRiskCard(await readJson(subject), {
+        locale,
+        ...(args.options.has("public") ? { publicKey: await readFile(required(args, "public"), "utf8") } : {}),
+        requireSignature: args.options.has("require-signature"),
+      });
+      const files: [string, string][] = [];
+      if (args.options.has("html")) files.push([resolve(required(args, "html")), renderRiskCard(card)]);
+      if (args.options.has("badge")) files.push([resolve(required(args, "badge")), renderRiskBadge(card)]);
+      if (!files.length || new Set(files.map(([path]) => path)).size !== files.length) throw new Error();
+      for (const [path, content] of files) {
+        await mkdir(dirname(path), { recursive: true });
+        await writeFile(path, content, { encoding: "utf8", mode: 0o600, flag: "wx" });
+        created.push(path);
+      }
+      process.stdout.write(JSON.stringify({ message: text.report, status: card.status, signature: card.signature, files: created }, null, 2) + "\n");
+      return 0;
+    } catch {
+      for (const path of created) await unlink(path).catch(() => undefined);
+      process.stderr.write(text.invalid + "\n");
+      return 1;
+    }
+  }
 
   if (command === "egress-keygen") {
     const privatePath = resolve(required(args, "private"));

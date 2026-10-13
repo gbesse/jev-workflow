@@ -1,6 +1,6 @@
 {
   "name": "jev-workflow",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Evidence-bound decision SLOs, contracts, testing, tracing, stability, and privacy controls for TypeSafe Jev.",
   "repository": {
     "type": "git",
@@ -34,13 +34,17 @@
     "dist",
     "packs",
     "README.md",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "docs"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "check": "tsc --noEmit",
     "test": "node --import tsx --test tests/*.test.ts",
-    "release:check": "npm run check && npm test && npm run build && npm pack --dry-run"
+    "release:check": "npm run check && npm test && npm run build && npm pack --dry-run",
+    "demo:riskcard": "npm run build && node scripts/riskcard-demo.mjs",
+    "test:browser": "npm run build && node scripts/riskcard-browser.mjs",
+    "format:check": "prettier --check src/riskcard.ts tests/riskcard.test.ts scripts/riskcard-*.mjs docs/riskcard.md"
   },
   "engines": {
     "node": ">=22"
@@ -50,6 +54,8 @@
   },
   "devDependencies": {
     "@types/node": "^24.19.0",
+    "playwright": "1.63.0",
+    "prettier": "3.9.9",
     "tsx": "^4.20.5",
     "typescript": "^5.9.2"
   },

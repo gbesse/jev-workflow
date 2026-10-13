@@ -1,5 +1,13 @@
 # jev-workflow
 
+## RiskCard · FR / EN / ES
+
+**FR :** `npm run demo:riskcard` produit trois rapports HTML et badges SVG synthétiques, sans Jev ni réseau. `jev-workflow report certificate.json --html riskcard.html --badge decision-slo.svg --lang fr` rend votre certificat. Expiration, signature et preuves par segment restent visibles. [Guide FR/EN/ES](docs/riskcard.md).
+
+**EN:** `npm run demo:riskcard` creates three synthetic HTML reports and SVG badges, without Jev or network. `jev-workflow report certificate.json --html riskcard.html --badge decision-slo.svg --lang en` renders your certificate. Expiry, signature and slice evidence stay visible. [FR/EN/ES guide](docs/riskcard.md).
+
+**ES:** `npm run demo:riskcard` genera tres informes HTML y badges SVG sintéticos, sin Jev ni red. `jev-workflow report certificate.json --html riskcard.html --badge decision-slo.svg --lang es` muestra su certificado. Caducidad, firma y pruebas por segmento permanecen visibles. [Guía FR/EN/ES](docs/riskcard.md).
+
 Evidence-bound decision SLOs, contracts, adversarial testing, flight recording,
 temporal stability, and privacy controls for
 [TypeSafe Jev](https://typesafe.ai/).

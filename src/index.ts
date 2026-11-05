@@ -25,3 +25,6 @@ export type * from "./types.js";
 
 export { buildRiskCard, renderRiskCard, renderRiskBadge } from "./riskcard.js";
 export type { RiskCard, RiskCardLocale, RiskCardStatus } from "./riskcard.js";
+
+export {summarizeTraceMeasurements}from './trace-summary.js';
+export type {TraceMeasurement}from './trace-summary.js';

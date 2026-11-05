@@ -345,3 +345,12 @@ npm run release:check
 The suite runs type checking, unit and integration tests, a production build,
 and an npm package dry run on Node 22 and 24. Contributions are welcome under
 the [MIT license](LICENSE).
+
+
+## 2026-11-05 — FR / EN / ES
+
+FR : `summarizeTraceMeasurements(traces)` fournit latences P50/P95 nearest-rank et jetons observés ; total inconnu si une trace manque l’usage. Refuse les identifiants dupliqués. Aucun prix fournisseur ni utilisateur humain déduit.
+
+EN: `summarizeTraceMeasurements(traces)` reports nearest-rank P50/P95 latency and observed tokens; total remains unknown when any trace lacks usage. Duplicate IDs rejected. No provider price or human users inferred.
+
+ES: `summarizeTraceMeasurements(traces)` informa latencia P50/P95 nearest-rank y tokens observados; total desconocido si falta consumo en alguna traza. Rechaza identificadores duplicados. No infiere precios ni usuarios humanos.

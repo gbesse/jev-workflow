@@ -6,3 +6,9 @@ export function summarizeTraceMeasurements(traces:ReadonlyArray<TraceMeasurement
  latency.sort((a,b)=>a-b);const quantile=(p:number)=>latency.length?latency[Math.ceil(p*latency.length)-1]!:null;
  return {traces:traces.length,knownInputTokens:tokens,totalInputTokens:unknown?null:tokens,unknownTokenTraces:unknown,latencyP50Ms:quantile(.5),latencyP95Ms:quantile(.95),quantileMethod:'nearest_rank',userAdoptionInferred:false};
 }
+
+export function traceTelemetryRows(traces:ReadonlyArray<TraceMeasurement>){
+ summarizeTraceMeasurements(traces);
+ const optionalText=(value:unknown):string|null=>typeof value==='string'&&value.length<=200?value:null;
+ return {rows:traces.map(t=>({traceId:t.traceId,startTime:t.startTime,endTime:t.endTime,model:optionalText(t.attributes['gen_ai.request.model']),workflowFingerprint:optionalText(t.attributes['jev.workflow.fingerprint']),inputTokens:typeof t.attributes['gen_ai.usage.input_tokens']==='number'?t.attributes['gen_ai.usage.input_tokens']:null})),inputPayloadsIncluded:false,eventsIncluded:false,piiAbsenceGuaranteed:false};
+}

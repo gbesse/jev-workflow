@@ -1,6 +1,6 @@
 {
   "name": "jev-workflow",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Evidence-bound decision SLOs, contracts, testing, tracing, stability, and privacy controls for TypeSafe Jev.",
   "repository": {
     "type": "git",

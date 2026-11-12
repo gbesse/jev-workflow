@@ -28,3 +28,5 @@ export type { RiskCard, RiskCardLocale, RiskCardStatus } from "./riskcard.js";
 
 export {summarizeTraceMeasurements}from './trace-summary.js';
 export type {TraceMeasurement}from './trace-summary.js';
+
+export {traceTelemetryRows}from './trace-summary.js';

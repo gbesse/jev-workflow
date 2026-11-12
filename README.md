@@ -354,3 +354,12 @@ FR : `summarizeTraceMeasurements(traces)` fournit latences P50/P95 nearest-rank 
 EN: `summarizeTraceMeasurements(traces)` reports nearest-rank P50/P95 latency and observed tokens; total remains unknown when any trace lacks usage. Duplicate IDs rejected. No provider price or human users inferred.
 
 ES: `summarizeTraceMeasurements(traces)` informa latencia P50/P95 nearest-rank y tokens observados; total desconocido si falta consumo en alguna traza. Rechaza identificadores duplicados. No infiere precios ni usuarios humanos.
+
+
+## 2026-11-12 — FR / EN / ES
+
+FR : Exporter uniquement les champs de télémétrie autorisés, sans payloads ni événements ; les identifiants peuvent encore être sensibles.
+
+EN: Export allowlisted telemetry without payloads or events; identifiers can still be sensitive.
+
+ES: Exportar telemetría permitida sin cargas ni eventos; identificadores aún pueden ser sensibles.
